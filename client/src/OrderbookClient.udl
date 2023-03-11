@@ -1,0 +1,60 @@
+[Error]
+enum OrderbookError {
+    "InitializeAlreadyCalled",
+    "NotInitialized",
+    "TokenError",
+};
+
+[Enum]
+interface OrderbookResponse {
+    Initialized();
+    Shutdown();
+    BookSummary(Summary summary);
+    Failed(string reason);
+};
+
+dictionary Summary {
+    double spread;
+    sequence<Level> bids;
+    sequence<Level> asks;
+};
+
+dictionary Level {
+    string exchange;
+    double price;
+    double amount;
+};
+
+interface Orderbook {
+    constructor();
+
+    // Try to get the book summary stream going
+    [Throws=OrderbookError]
+    void summary();
+};
+
+namespace OrderbookClient {
+    // Initialize the Orderbook API client in a separate thread. This returns
+    // immediately.
+    [Throws=OrderbookError]
+    void orderbook_client_initialize(string token, string endpoint, OnOrderbookClientEvents callbacks);
+
+    // Shut down the Orderbook API client in a separate thread. This returns
+    // immediately.
+    [Throws=OrderbookError]
+    void orderbook_client_shutdown();
+ };
+
+callback interface OnOrderbookClientEvents {
+    // called after initialization is complete
+    void initialized(Orderbook orderbook);
+
+    // called when shutdown is complete
+    void shutdown();
+
+    // callback whenever the summary has been updated
+    void summary(Summary summary);
+
+    // catch all callback
+    void completed(OrderbookResponse resp);
+};

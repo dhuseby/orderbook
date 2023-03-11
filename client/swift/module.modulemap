@@ -1,0 +1,6 @@
+framework module OrderbookClient {
+  umbrella header "OrderbookClient.h"
+
+  export *
+  module * { export * }
+}

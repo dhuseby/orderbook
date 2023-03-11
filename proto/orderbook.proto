@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package orderbook;
+
+service OrderbookAggregator {
+    rpc BookSummary(SummaryReq) returns (stream Summary);
+}
+
+message OberonProof {
+    string id = 1;
+    uint64 timestamp = 2;
+    bytes proof = 3;
+}
+
+message SummaryReq {
+    OberonProof proof = 1;
+}
+
+message Summary {
+    double spread = 1;
+    repeated Level bids = 2;
+    repeated Level asks = 3;
+}
+
+message Level {
+    string exchange = 1;
+    double price = 2;
+    double amount = 3;
+}

@@ -1,0 +1,16 @@
+[setup]
+proxy = true
+
+[proxy]
+url = "127.0.0.1"
+port = 1080
+
+[[exchanges]]
+platform = "binance"
+url = "wss://stream.binance.com"
+port = 9443
+
+[[exchanges]]
+platform = "bitstamp"
+url = "wss://ws.bitstamp.net"
+port = 443

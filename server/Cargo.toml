@@ -1,0 +1,27 @@
+[package]
+name = "orderbook-server"
+authors = ["Dave Huseby <dwh@linuxprogrammer.org>"]
+version = "0.1.0"
+edition = "2021"
+description = "A simple orderbook aggregation service"
+license = "APL-2.0"
+
+[dependencies]
+anyhow = "1.0"
+camino = "1.1"
+oberon = { version = "2.0.0", features = ["std"] }
+rust_decimal = { version = "1.28.1", features = ["serde_json", "arbitrary", "serde-with-arbitrary-precision"] }
+serde = { version = "1.0", features = ["std", "derive"] }
+structopt = "0.3"
+thiserror = "1.0"
+tokio = { version = "1.25", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tokio-tungstenite = { version = "0.18.0", features = ["native-tls", "webpki-roots", "webpki"] }
+toml = "0.7"
+tonic = "0.8"
+vlog = "0.1"
+
+[build-dependencies]
+anyhow = "1.0"
+camino = "1.1"
+tonic-build = "0.8"

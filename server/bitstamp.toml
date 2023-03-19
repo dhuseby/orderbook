@@ -1,0 +1,10 @@
+[[exchanges]]
+platform = "bitstamp"
+proxy = ""
+url = "wss://ws.bitstamp.net:443"
+
+[[markets]]
+symbol = "ethbtc"
+
+[[markets]]
+symbol = "btcusdt"

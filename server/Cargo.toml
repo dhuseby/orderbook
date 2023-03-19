@@ -8,10 +8,16 @@ license = "APL-2.0"
 
 [dependencies]
 anyhow = "1.0"
+async-socks5 = "0.5.1"
+atomic-counter = "1.0.1"
 camino = "1.1"
+futures = "0.3.27"
+futures-util = "0.3.27"
+http = "0.2.9"
 oberon = { version = "2.0.0", features = ["std"] }
 rust_decimal = { version = "1.28.1", features = ["serde_json", "arbitrary", "serde-with-arbitrary-precision"] }
 serde = { version = "1.0", features = ["std", "derive"] }
+serde_json = "1.0.94"
 structopt = "0.3"
 thiserror = "1.0"
 tokio = { version = "1.25", features = ["full"] }
@@ -19,6 +25,8 @@ tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = { version = "0.18.0", features = ["native-tls", "webpki-roots", "webpki"] }
 toml = "0.7"
 tonic = "0.8"
+tungstenite = "0.18.0"
+url = "2.3.1"
 vlog = "0.1"
 
 [build-dependencies]

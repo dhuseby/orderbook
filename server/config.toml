@@ -1,16 +1,17 @@
-[setup]
-proxy = true
-
-[proxy]
-url = "127.0.0.1"
-port = 1080
-
 [[exchanges]]
 platform = "binance"
-url = "wss://stream.binance.com"
-port = 9443
+proxy = "socks5://127.0.0.1:1080"
+url = "wss://stream.binance.com:9443/stream"
 
 [[exchanges]]
 platform = "bitstamp"
-url = "wss://ws.bitstamp.net"
-port = 443
+proxy = ""
+url = "wss://ws.bitstamp.net:443"
+
+# For each exchange, a source will be created for each market
+
+[[markets]]
+symbol = "ethbtc"
+
+[[markets]]
+symbol = "btcusdt"

@@ -13,12 +13,16 @@ pub struct OberonProof {
 pub struct SummaryReq {
     #[prost(message, optional, tag = "1")]
     pub proof: ::core::option::Option<OberonProof>,
+    #[prost(string, tag = "2")]
+    pub symbol: ::prost::alloc::string::String,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Summary {
-    #[prost(double, tag = "1")]
-    pub spread: f64,
+    /// encoded as a string to avoid rounding errors
+    /// deserialize to a fixed point decimal number suitable for financial calculations
+    #[prost(string, tag = "1")]
+    pub spread: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
     pub bids: ::prost::alloc::vec::Vec<Level>,
     #[prost(message, repeated, tag = "3")]
@@ -29,10 +33,12 @@ pub struct Summary {
 pub struct Level {
     #[prost(string, tag = "1")]
     pub exchange: ::prost::alloc::string::String,
-    #[prost(double, tag = "2")]
-    pub price: f64,
-    #[prost(double, tag = "3")]
-    pub amount: f64,
+    /// encoded as a string to avoid rounding errors
+    /// deserialize to a fixed point decimal number suitable for financial calculations
+    #[prost(string, tag = "2")]
+    pub price: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub amount: ::prost::alloc::string::String,
 }
 /// Generated client implementations.
 pub mod orderbook_aggregator_client {

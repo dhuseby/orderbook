@@ -9,12 +9,16 @@ license = "APL-2.0"
 [dependencies]
 anyhow = "1.0"
 async-socks5 = "0.5.1"
+async-trait = "0.1.67"
 atomic-counter = "1.0.1"
 camino = "1.1"
 futures = "0.3.27"
 futures-util = "0.3.27"
+hex = "0.4.3"
 http = "0.2.9"
+iso8601-timestamp = "0.2.10"
 oberon = { version = "2.0.0", features = ["std"] }
+prost = "0.11.8"
 rust_decimal = { version = "1.28.1", features = ["serde_json", "arbitrary", "serde-with-arbitrary-precision"] }
 serde = { version = "1.0", features = ["std", "derive"] }
 serde_json = "1.0.94"
@@ -27,6 +31,7 @@ toml = "0.7"
 tonic = "0.8"
 tungstenite = "0.18.0"
 url = "2.3.1"
+uuid = "1.3.0"
 vlog = "0.1"
 
 [build-dependencies]

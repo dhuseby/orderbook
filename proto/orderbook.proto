@@ -14,16 +14,21 @@ message OberonProof {
 
 message SummaryReq {
     OberonProof proof = 1;
+    string symbol = 2;
 }
 
 message Summary {
-    double spread = 1;
+    // encoded as a string to avoid rounding errors
+    // deserialize to a fixed point decimal number suitable for financial calculations
+    string spread = 1;
     repeated Level bids = 2;
     repeated Level asks = 3;
 }
 
 message Level {
     string exchange = 1;
-    double price = 2;
-    double amount = 3;
+    // encoded as a string to avoid rounding errors
+    // deserialize to a fixed point decimal number suitable for financial calculations
+    string price = 2;
+    string amount = 3;
 }

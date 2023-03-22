@@ -1,58 +1,39 @@
 #![allow(dead_code)]
-use crate::{config::Exchange, error::Error, platform::PlatformCmd, Result};
-use futures_util::{SinkExt, StreamExt};
-use tokio::{
-    net::TcpStream,
-    sync::{broadcast, mpsc},
-    task::JoinHandle,
+use crate::{
+    config::Exchange,
+    error::Error,
+    platform::{Orders, PlatformCmd},
+    Result,
 };
+use futures_util::{SinkExt, StreamExt};
+use std::collections::HashSet;
+use tokio::{net::TcpStream, sync::mpsc, task::JoinHandle};
 use tokio_tungstenite::client_async_tls;
-use vlog::{v3, verbose_log};
+use vlog::{v1, v3, verbose_log};
 
-// an alias to the join handle for the task
-pub type Source = JoinHandle<Result<()>>;
+#[derive(Debug)]
+pub struct Source {
+    /// handle to the source task
+    handle: Option<JoinHandle<Result<()>>>,
 
-#[derive(Clone, Debug)]
-pub enum SourceCmd {
-    Shutdown,
-    Subscribe(String),
-    Unsubscribe(String),
+    /// shutdown sender to tell our task to exit
+    shutdown_tx: mpsc::Sender<()>,
+
+    /// list of markets that the source is subscribed to
+    markets: HashSet<String>,
+
+    /// watch channel for the list of markets
+    markets_tx: mpsc::UnboundedSender<HashSet<String>>,
 }
 
-#[derive(Debug, Default)]
-pub struct SourceBuilder {
-    exchange: Option<Exchange>,
-    source_rx: Option<broadcast::Receiver<SourceCmd>>,
-    platform_tx: Option<mpsc::Sender<PlatformCmd>>,
-}
-
-impl SourceBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_exchange(mut self, exchange: Exchange) -> Self {
-        self.exchange = Some(exchange);
-        self
-    }
-
-    pub fn with_source_rx(mut self, source_rx: broadcast::Receiver<SourceCmd>) -> Self {
-        self.source_rx = Some(source_rx);
-        self
-    }
-
-    pub fn with_platform_tx(mut self, platform_tx: mpsc::Sender<PlatformCmd>) -> Self {
-        self.platform_tx = Some(platform_tx);
-        self
-    }
-
-    pub async fn try_build(mut self) -> Result<Source> {
-        // get the exchange
-        let exchange = match &self.exchange {
-            Some(e) => e.clone(),
-            None => return Err(Error::NoExchangeDefined),
-        };
-        v3!("attempting to ws to {:?}", exchange.platform);
+impl Source {
+    /// try to build a Source and connect to the exchange via a websocket
+    pub async fn try_build(
+        exchange: Exchange,
+        data_tx: mpsc::Sender<Orders>,
+        restart_tx: mpsc::Sender<Exchange>,
+    ) -> Result<Self> {
+        v3!("{} - try_build", exchange.platform);
 
         // get the exchange ToSocketAddrs
         let ex_host_str = exchange
@@ -76,106 +57,146 @@ impl SourceBuilder {
                     .port_or_known_default()
                     .ok_or(Error::InvalidProxyDefined)?;
 
-                v3!("proxying through {}:{}", pr_host_str, pr_port);
+                v1!(
+                    "{} - proxying through {}:{}",
+                    exchange.platform,
+                    pr_host_str,
+                    pr_port
+                );
                 let mut stream = TcpStream::connect((pr_host_str, pr_port)).await?;
-                v3!("connecting to {}:{}", ex_host_str, ex_port);
+                v1!(
+                    "{} - connecting to {}:{}",
+                    exchange.platform,
+                    ex_host_str,
+                    ex_port
+                );
                 async_socks5::connect(&mut stream, (ex_host_str, ex_port), None).await?;
                 stream
             } else {
-                v3!("connecting to {}:{}", ex_host_str, ex_port);
+                v1!(
+                    "{} - connecting to {}:{}",
+                    exchange.platform,
+                    ex_host_str,
+                    ex_port
+                );
                 let stream = TcpStream::connect((ex_host_str, ex_port)).await?;
                 stream
             }
         };
 
-        v3!("connected!");
+        v1!("{} - connected!", exchange.platform);
 
         // make the web socket connection
         let (mut ws_stream, ws_resp) = match client_async_tls(&exchange.url, stream).await {
             Ok((s, r)) => (s, r),
             Err(e) => {
-                v3!("connection failed...");
+                v3!("{} - connection failed...", exchange.platform);
                 match e {
                     tokio_tungstenite::tungstenite::error::Error::Http(ref r) => {
                         if let Some(b) = r.body() {
                             if let Ok(s) = std::str::from_utf8(&b) {
-                                v3!("{}", s);
+                                v3!("{} - {}", exchange.platform, s);
                             }
                         }
                     }
                     _ => {
-                        v3!("unknown tungstenite error")
+                        v3!("{} - unknown tungstenite error", exchange.platform)
                     }
                 }
                 return Err(Error::WebsocketError(e));
             }
         };
 
-        v3!("ws connect status: {}", ws_resp.status());
+        v3!(
+            "{} - ws connect status: {}",
+            exchange.platform,
+            ws_resp.status()
+        );
 
-        // get the shutdown_rx
-        if self.source_rx.is_none() {
-            return Err(Error::NoCommandChannel);
-        }
-        let mut source_rx = self.source_rx.take().unwrap();
-
-        // get the platform_tx
-        let platform_tx = match &self.platform_tx {
-            Some(d) => d.clone(),
-            None => return Err(Error::NoDataChannel),
-        };
-
-        // connected...do the platform callback to get any messages to send before subscribing
+        // connected...get platform specific setup messages to send
         if let Some(msg) = exchange.platform.connected().await {
-            v3!("-> {}", msg);
+            v3!("{} => {}", exchange.platform, msg);
             if ws_stream.send(msg).await.is_err() {
-                v3!("failed to send connection message");
+                v3!("{} - failed to send connection message", exchange.platform);
             }
         }
 
-        v3!("spawing task");
-        let handle: Source = tokio::spawn(async move {
+        // create the shutdown channel
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+
+        // create the markets update channel
+        let (markets_tx, mut markets_rx) = mpsc::unbounded_channel::<HashSet<String>>();
+
+        v3!("{} - spawing source task", exchange.platform);
+
+        let handle: JoinHandle<Result<()>> = tokio::spawn(async move {
+            v3!("{} - source task running", exchange.platform);
+            let subscribed: HashSet<String> = HashSet::default();
             loop {
                 tokio::select! {
-                    Ok(cmd) = source_rx.recv() => match cmd {
-                        SourceCmd::Shutdown => {
-                            v3!("shutting down");
-                            return Ok(());
-                        },
-                        SourceCmd::Subscribe(symbol) => {
-                            v3!("subscribing to: {}", symbol);
-                            if let Ok(msg) = exchange.platform.subscribe(&symbol).await {
-                                v3!("-> {}", msg);
-                                if ws_stream.send(msg).await.is_err() {
-                                    v3!("failed to send subscribe message");
-                                }
-                            } else {
-                                v3!("failed to create subscribe message");
-                            }
-                        },
-                        SourceCmd::Unsubscribe(symbol) => {
-                            v3!("unsubscribing from: {}", symbol);
-                            if let Ok(msg) = exchange.platform.unsubscribe(&symbol).await {
-                                if ws_stream.send(msg).await.is_err() {
-                                    v3!("failed to send unsubscribe message");
-                                }
-                            } else {
-                                v3!("failed to create unsubscribe message");
-                            }
-                        },
+                    // this handles shutdown notifications. if this task exits unexpectedly this
+                    // receiver will be closed and can be used to detect the crash
+                    _ = shutdown_rx.recv() => {
+                        v1!("{} - shutting down", exchange.platform);
+                        return Ok(());
                     },
+
+                    // this handles updated market list
+                    Some(markets) = markets_rx.recv() => {
+                        // anything in markets not in subscribed are subscribes
+                        let subscribes: HashSet<_> = markets.difference(&subscribed).collect();
+                        for market in subscribes.iter() {
+                            v1!("{} - subscribing to: {}", exchange.platform, market);
+                            if let Ok(msg) = exchange.platform.subscribe(&market).await {
+                                //v3!("-> {}", msg);
+                                if ws_stream.send(msg).await.is_err() {
+                                    v3!("{} - failed to send subscribe message", exchange.platform);
+                                }
+                            } else {
+                                v3!("{} - failed to create subscribe message", exchange.platform);
+                            }
+                        }
+
+                        // anything in subscribed and not in markets are unsubscribes
+                        let unsubscribes: HashSet<_> = subscribed.difference(&markets).collect();
+                        for market in unsubscribes.iter() {
+                            v3!("{} - unsubscribing from: {}", exchange.platform, market);
+                            if let Ok(msg) = exchange.platform.unsubscribe(&market).await {
+                                if ws_stream.send(msg).await.is_err() {
+                                    v3!("{} - failed to send unsubscribe message", exchange.platform);
+                                }
+                            } else {
+                                v3!("{} - failed to create unsubscribe message", exchange.platform);
+                            }
+                        }
+                    },
+
+                    // this handles the incoming messages from the websocket
                     Some(res) = ws_stream.next() => {
                         match res {
                             Ok(msg) => {
-                                //v3!("<- {}", msg);
+                                //v3!("{} <= {}", exchange.platform, msg);
                                 if let Some(cmd) = exchange.platform.process_msg(msg.to_text()?).await {
-                                    if platform_tx.send(cmd).await.is_err() {
-                                        v3!("failed to send data to aggregator");
+                                    match cmd {
+                                        // send the data to the data aggregator
+                                        PlatformCmd::Orders(ref orders) => {
+                                            v3!("{} - {} orders", orders.platform, orders.symbol);
+                                            if data_tx.send(orders.clone()).await.is_err() {
+                                                v3!("{} - failed to send data to aggregator", exchange.platform);
+                                            }
+                                        }
+                                        // send the reconnect request to the server
+                                        PlatformCmd::RequestReconnect => {
+                                            v3!("{} - restart requested", exchange.platform);
+                                            if restart_tx.send(exchange.clone()).await.is_err() {
+                                                v3!("{} - failed to set reconnect request", exchange.platform);
+                                            }
+                                        }
                                     }
                                 }
                             },
                             Err(e) => {
-                                v3!("ws err: {:?}", e);
+                                v3!("{} - ws err: {:?}", exchange.platform, e);
                             },
                         }
                     }
@@ -183,6 +204,57 @@ impl SourceBuilder {
             }
         });
 
-        Ok(handle)
+        Ok(Self {
+            handle: Some(handle),
+            shutdown_tx,
+            markets: HashSet::default(),
+            markets_tx,
+        })
+    }
+
+    /// check if the Source's task is still running
+    pub async fn running(&self) -> bool {
+        // this returns true if the receive end of the channel is closed/dropped which
+        // will happen when the task exits
+        self.shutdown_tx.is_closed()
+    }
+
+    /// wait for the Source's task to end
+    pub async fn join(&mut self) -> Result<()> {
+        if let Some(handle) = self.handle.take() {
+            handle.await?
+        } else {
+            Err(Error::NoJoinHandle)
+        }
+    }
+
+    /// tell the Source task to shut down and release all resources
+    pub async fn shutdown(&self) -> Result<()> {
+        self.shutdown_tx
+            .send(())
+            .await
+            .map_err(|_| Error::ShutdownError)
+    }
+
+    /// tell the Source to subscribe to the specified symbol
+    pub async fn subscribe(&mut self, symbol: &str) -> Result<()> {
+        if self.markets.insert(symbol.to_string()) {
+            self.markets_tx
+                .send(self.markets.clone())
+                .map_err(|_| Error::TokioWatchSendError)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// tell the Source to unsubscribe from the specified symbol
+    pub async fn unsubscribe(&mut self, symbol: &str) -> Result<()> {
+        if self.markets.remove(symbol) {
+            self.markets_tx
+                .send(self.markets.clone())
+                .map_err(|_| Error::TokioWatchSendError)
+        } else {
+            Ok(())
+        }
     }
 }

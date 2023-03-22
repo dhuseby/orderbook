@@ -1,23 +1,7 @@
-use orderbook_server::{
-    config::Config,
-    error::Error,
-    platform::PlatformCmd,
-    source::{Source, SourceBuilder, SourceCmd},
-    Result,
-};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use orderbook_server::{aggregator::Aggregator, config::Config, Result};
 use structopt::StructOpt;
-use tokio::{
-    signal,
-    sync::{broadcast, mpsc},
-};
-use vlog::{set_verbosity_level, v3, verbose_log};
-
-static CMD_COUNTER: AtomicUsize = AtomicUsize::new(1);
-
-async fn get_next_num() -> usize {
-    CMD_COUNTER.fetch_add(1, Ordering::SeqCst)
-}
+use tokio::signal;
+use vlog::{set_verbosity_level, v1, v3, verbose_log};
 
 #[derive(Debug, StructOpt)]
 #[structopt(
@@ -43,51 +27,29 @@ async fn main() -> Result<()> {
 
     // set the verbosity level
     set_verbosity_level(opt.verbosity);
-    v3!("verbosity set to: {}", opt.verbosity);
+    v3!("EXE - verbosity set to: {}", opt.verbosity);
 
-    println!("{:?}", opt.config);
-
-    let (source_tx, _) = broadcast::channel::<SourceCmd>(64);
-    let (platform_tx, mut platform_rx) = mpsc::channel::<PlatformCmd>(64);
-    let mut sources: Vec<Source> = Vec::with_capacity(2);
-
-    // fire up web sockets for each exchange
-    for exchange in &opt.config.exchanges {
-        sources.push(
-            SourceBuilder::new()
-                .with_exchange(exchange.clone())
-                .with_source_rx(source_tx.subscribe()) // subscribe creates a Receiver
-                .with_platform_tx(platform_tx.clone())
-                .try_build()
-                .await?,
-        );
-    }
-
-    for market in &opt.config.markets {
-        // send a subscribe message to all sources
-        let _ = source_tx
-            .send(SourceCmd::Subscribe(market.symbol.clone()))
-            .map_err(|_| Error::TokioBroadcastError);
-    }
+    // create the data aggregator, it manages the sources of
+    // market data from the different exchanages
+    v1!("EXE - try_build aggregator");
+    let mut aggregator = Aggregator::try_build(opt.config.clone()).await?;
 
     loop {
         tokio::select! {
-            Some(cmd) = platform_rx.recv() => {
-                v3!("{} {}", get_next_num().await, cmd);
-            },
             _ = signal::ctrl_c() => {
+                if aggregator.shutdown().await.is_err() {
+                    v3!("EXE - failed to shut down aggregator");
+                } else {
+                    // wait for the task to stop
+                    v1!("EXE - waiting for aggregator to exit");
+                    let _ = aggregator.join().await;
+                }
                 break;
             },
         }
     }
 
-    // tell the sources to shut down
-    let _ = source_tx
-        .send(SourceCmd::Shutdown)
-        .map_err(|_| Error::TokioBroadcastError);
-
-    // wait on all of the source tasks
-    futures::future::join_all(sources).await;
+    v1!("EXE - exiting");
 
     Ok(())
 }

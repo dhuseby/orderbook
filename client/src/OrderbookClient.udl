@@ -9,20 +9,20 @@ enum OrderbookError {
 interface OrderbookResponse {
     Initialized();
     Shutdown();
-    BookSummary(Summary summary);
+    OrderbookSummary(Summary summary);
     Failed(string reason);
 };
 
 dictionary Summary {
-    double spread;
+    string spread;
     sequence<Level> bids;
     sequence<Level> asks;
 };
 
 dictionary Level {
     string exchange;
-    double price;
-    double amount;
+    string price;
+    string amount;
 };
 
 interface Orderbook {
@@ -30,31 +30,30 @@ interface Orderbook {
 
     // Try to get the book summary stream going
     [Throws=OrderbookError]
-    void summary();
+    u64 summary(string symbol);
 };
 
 namespace OrderbookClient {
     // Initialize the Orderbook API client in a separate thread. This returns
     // immediately.
     [Throws=OrderbookError]
-    void orderbook_client_initialize(string token, string endpoint, OnOrderbookClientEvents callbacks);
+    u64 orderbook_client_initialize(string token, string endpoint, OnOrderbookClientEvents callbacks);
 
     // Shut down the Orderbook API client in a separate thread. This returns
     // immediately.
     [Throws=OrderbookError]
-    void orderbook_client_shutdown();
+    u64 orderbook_client_shutdown();
  };
 
 callback interface OnOrderbookClientEvents {
-    // called after initialization is complete
-    void initialized(Orderbook orderbook);
-
-    // called when shutdown is complete
-    void shutdown();
+    // called after initialization is complete, have to do this because we can't have enums that
+    // contain object interfaces, otherwise we'd just use the completed callback with an
+    // OrderbookResponse::Initialize(orderbooK)...oh well
+    void initialized(u64 id, Orderbook orderbook);
 
     // callback whenever the summary has been updated
-    void summary(Summary summary);
+    void summary(u64 id, Summary summary);
 
     // catch all callback
-    void completed(OrderbookResponse resp);
+    void completed(u64 id, OrderbookResponse resp);
 };

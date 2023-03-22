@@ -12,7 +12,7 @@ use serde::{
 use std::{
     fmt::{self, Formatter},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
 };
@@ -24,11 +24,11 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 enum Task {
     /// Initialize task
-    Initialize { endpoint: String },
+    Initialize { id: u64, endpoint: String },
     /// Shutdown task
-    Shutdown,
+    Shutdown { id: u64 },
     /// Get the order book summary
-    Summary,
+    Summary { id: u64, symbol: String },
 }
 
 #[derive(Clone, Debug)]
@@ -38,9 +38,16 @@ pub enum OrderbookResponse {
     /// Shutdown response
     Shutdown,
     /// Order book summary response
-    BookSummary { summary: Summary },
+    OrderbookSummary { summary: Summary },
     /// Failed
     Failed { reason: String },
+}
+
+#[derive(Debug)]
+enum TaskResponse {
+    Initialized,
+    Shutdown,
+    SummaryStream { stream: Streaming<Summary> },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -83,65 +90,132 @@ pub enum TaskError {
 }
 
 impl Task {
-    async fn execute(
-        &self,
-        chan: mpsc::Sender<(Task, OrderbookResponse)>,
-    ) -> Result<OrderbookResponse, TaskError> {
+    async fn get_id(&self) -> u64 {
         match self {
-            Task::Initialize { ref endpoint } => {
+            Task::Initialize { id, .. } | Task::Shutdown { id } | Task::Summary { id, .. } => *id,
+        }
+    }
+
+    async fn execute(&self) -> Result<TaskResponse, TaskError> {
+        match self {
+            Task::Initialize { ref endpoint, .. } => {
                 // get the client
                 let mut client = global_client().lock().await;
 
                 // try to connect to the server
-                client.client = Some(OrderbookAggregatorClient::connect(endpoint.clone()).await?);
-
-                return Ok(OrderbookResponse::Initialized);
+                if let Ok(grpc) = OrderbookAggregatorClient::connect(endpoint.clone()).await {
+                    client.grpc = Some(grpc);
+                    Ok(TaskResponse::Initialized)
+                } else {
+                    Err(TaskError::NoConnection)
+                }
             }
-            Task::Shutdown => {
+            Task::Shutdown { .. } => {
                 // Do shutdown stuff here
-                return Ok(OrderbookResponse::Shutdown);
+                Ok(TaskResponse::Shutdown)
             }
-            Task::Summary => {
+            Task::Summary { ref symbol, .. } => {
                 let mut client = global_client().lock().await;
                 let proof = client.token.get_proof().await?;
-                let req = tonic::Request::new(SummaryReq { proof: Some(proof) });
 
-                let grpc = client.client.as_mut().ok_or(TaskError::NoConnection)?;
+                // make the request for the orderbook summary stream
+                let req = tonic::Request::new(SummaryReq {
+                    proof: Some(proof),
+                    symbol: symbol.to_string(),
+                });
+
+                // get the grpc client
+                let grpc = client.grpc.as_mut().ok_or(TaskError::NoConnection)?;
+
+                // send the request
                 let summary: Streaming<Summary> = grpc.book_summary(req).await?.into_inner();
 
-                //TODO spawn tokio::task to handle the streaming summary updates
-
-                //return Ok(OrderbookResponse::Summary { summary: s });
-                return Ok(OrderbookResponse::Initialized);
+                Ok(TaskResponse::SummaryStream { stream: summary })
             }
-            _ => return Err(TaskError::NotImplemented),
         }
     }
 }
 
-async fn do_task(task: Task, chan: mpsc::Sender<(Task, OrderbookResponse)>) {
-    let resp = match task.execute(chan.clone()).await {
-        Ok(r) => r,
-        Err(e) => OrderbookResponse::Failed {
-            reason: format!("task error: {:?}", e),
-        },
-    };
+async fn do_task(task: Task, chan: mpsc::Sender<(Task, Result<TaskResponse, TaskError>)>) {
+    // execute the task
+    let resp = task.execute().await;
 
     // send the task and the response to the callback task
     let _ = chan.send((task, resp)).await;
 }
 
-async fn do_resp(task: Task, resp: OrderbookResponse) {
-    let client = global_client().lock().await;
-    match task {
-        Task::Initialize { .. } => match resp {
-            OrderbookResponse::Initialized => {
-                client.callbacks.initialized(Arc::new(Orderbook::new()))
+async fn do_resp(task: Task, resp: Result<TaskResponse, TaskError>) {
+    let id = task.get_id().await;
+    match resp {
+        Err(e) => {
+            // NOTE: hold the lock for as little time as possible
+            let client = global_client().lock().await;
+            // send the error to the completed callback
+            client.callbacks.completed(
+                id,
+                OrderbookResponse::Failed {
+                    reason: format!("{}", e),
+                },
+            );
+        }
+        Ok(r) => match r {
+            TaskResponse::Initialized => {
+                // NOTE: hold the lock for as little time as possible
+                let client = global_client().lock().await;
+                client.callbacks.initialized(id, Arc::new(Orderbook::new()));
             }
-            _ => client.callbacks.completed(resp),
+            TaskResponse::Shutdown => {
+                // NOTE: hold the lock for as little time as possible
+                let client = global_client().lock().await;
+                client.callbacks.completed(id, OrderbookResponse::Shutdown);
+            }
+
+            // NOTE: it is OK to loop here because a new task is spawned for each call to do_resp.
+            // The only real concern is that we have to minimize how much time we hold the global
+            // client mutex lock. That's why we get the lock only when we need to make a callback
+            // and drop it immediately afterwards
+            TaskResponse::SummaryStream { mut stream } => loop {
+                match stream.message().await {
+                    Ok(msg) => {
+                        if let Some(summary) = msg {
+                            // 🔒
+                            let client = global_client().lock().await;
+
+                            // send the next summary update
+                            client
+                                .callbacks
+                                .completed(id, OrderbookResponse::OrderbookSummary { summary });
+                            // 🔓
+                        } else {
+                            // 🔒
+                            let client = global_client().lock().await;
+
+                            // let the client know that the stream is ending and why
+                            client.callbacks.completed(
+                                id,
+                                OrderbookResponse::Failed {
+                                    reason: "The stream was closed by the server".to_string(),
+                                },
+                            );
+                            // 🔓
+                        }
+                    }
+                    Err(status) => {
+                        // 🔒
+                        let client = global_client().lock().await;
+
+                        // let the client know the stream is ending and why
+                        client.callbacks.completed(
+                            id,
+                            OrderbookResponse::Failed {
+                                reason: format!("gRPC: {}", status),
+                            },
+                        );
+                        // 🔓
+                    }
+                }
+            },
         },
-        Task::Shutdown => client.callbacks.shutdown(),
-        _ => client.callbacks.completed(resp),
     }
 }
 
@@ -187,18 +261,19 @@ struct Client {
     task_send: mpsc::Sender<Task>,
     callbacks: Box<dyn OnOrderbookClientEvents>,
     token: OberonToken,
-    client: Option<OrderbookAggregatorClient<tonic::transport::Channel>>,
+    grpc: Option<OrderbookAggregatorClient<tonic::transport::Channel>>,
 }
 
 impl Client {
     fn new(token: OberonToken, callbacks: Box<dyn OnOrderbookClientEvents>) -> Self {
         // set up the channel for communicating
         let (task_send, mut task_recv) = mpsc::channel::<Task>(16);
-        let (resp_send, mut resp_recv) = mpsc::channel::<(Task, OrderbookResponse)>(16);
+        let (resp_send, mut resp_recv) =
+            mpsc::channel::<(Task, Result<TaskResponse, TaskError>)>(16);
 
         // build the runtime
         let rt = Builder::new_multi_thread()
-            .worker_threads(16)
+            .worker_threads(64)
             .enable_all()
             .build()
             .unwrap();
@@ -233,7 +308,7 @@ impl Client {
             task_send,
             callbacks,
             token,
-            client: None,
+            grpc: None,
         }
     }
 
@@ -251,6 +326,14 @@ static INITIALIZE_CALLED: AtomicBool = AtomicBool::new(false);
 // convenience function for testing if initialize was called
 fn was_initialize_called() -> bool {
     INITIALIZE_CALLED.load(Ordering::SeqCst)
+}
+
+// atomic counter for matching up responses with requests
+static TASK_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+// convenience function to get the next number
+fn get_next_task_id() -> u64 {
+    TASK_COUNTER.fetch_add(1, Ordering::SeqCst)
 }
 
 // singleton of the client actor
@@ -290,23 +373,20 @@ pub enum OrderbookError {
 
 pub trait OnOrderbookClientEvents: Send {
     /// Called after initialization is complete
-    fn initialized(&self, orderbook: Arc<Orderbook>);
-
-    /// Called when shutdown is complete
-    fn shutdown(&self);
+    fn initialized(&self, id: u64, orderbook: Arc<Orderbook>);
 
     /// Called when summary is received
-    fn summary(&self, summary: Summary);
+    fn summary(&self, id: u64, summary: Summary);
 
     /// called when an operation completes
-    fn completed(&self, resp: OrderbookResponse);
+    fn completed(&self, id: u64, resp: OrderbookResponse);
 }
 
 pub fn orderbook_client_initialize(
     token: String,
     endpoint: String,
     callbacks: Box<dyn OnOrderbookClientEvents>,
-) -> Result<(), OrderbookError> {
+) -> Result<u64, OrderbookError> {
     if was_initialize_called() {
         return Err(OrderbookError::InitializeAlreadyCalled);
     }
@@ -317,14 +397,17 @@ pub fn orderbook_client_initialize(
     // mark initialization called
     INITIALIZE_CALLED.store(true, Ordering::SeqCst);
 
+    // get the next task id
+    let id = get_next_task_id();
+
     // run the initialize task
     let client = global_client().blocking_lock();
-    client.spawn_task(Task::Initialize { endpoint });
+    client.spawn_task(Task::Initialize { id, endpoint });
 
-    Ok(())
+    Ok(id)
 }
 
-pub fn orderbook_client_shutdown() -> Result<(), OrderbookError> {
+pub fn orderbook_client_shutdown() -> Result<u64, OrderbookError> {
     if !was_initialize_called() {
         return Err(OrderbookError::NotInitialized);
     }
@@ -332,11 +415,14 @@ pub fn orderbook_client_shutdown() -> Result<(), OrderbookError> {
     // reset so we can be initialized again
     INITIALIZE_CALLED.store(false, Ordering::SeqCst);
 
+    // get the next task id
+    let id = get_next_task_id();
+
     // run the shutdown task
     let client = global_client().blocking_lock();
-    client.spawn_task(Task::Shutdown);
+    client.spawn_task(Task::Shutdown { id });
 
-    Ok(())
+    Ok(id)
 }
 
 pub struct Orderbook {}
@@ -346,8 +432,15 @@ impl Orderbook {
         Self {}
     }
 
-    pub fn summary(&self) -> Result<(), OrderbookError> {
-        self.do_call(Task::Summary)
+    pub fn summary(&self, symbol: String) -> Result<u64, OrderbookError> {
+        // get the next task id
+        let id = get_next_task_id();
+
+        // do the summary task
+        match self.do_call(Task::Summary { id, symbol }) {
+            Ok(()) => Ok(id),
+            Err(e) => Err(e),
+        }
     }
 
     fn do_call(&self, task: Task) -> Result<(), OrderbookError> {

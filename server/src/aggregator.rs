@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 use crate::{
-    api_proof::ApiProof,
     config::{Config, Exchange},
     error::Error,
     orderbook::*,
@@ -8,19 +7,12 @@ use crate::{
     source::Source,
     Result,
 };
-use futures_util::Stream;
-use oberon::PublicKey;
 use rust_decimal::prelude::*;
-use std::{
-    collections::{BTreeSet, HashMap},
-    pin::Pin,
-};
+use std::collections::{BTreeSet, HashMap};
 use tokio::{
     sync::{mpsc, watch},
     task::JoinHandle,
 };
-use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
 use vlog::{v1, v3, verbose_log};
 
 // the Orderbook keeps the the latest asks and bids for each platform we're talking to and then
@@ -124,26 +116,14 @@ pub struct Aggregator {
 
     /// shutdown sender to tell our task to exit
     shutdown_tx: mpsc::Sender<()>,
-
-    /// watch channels, one for each configured symbol pair
-    watch_rx: HashMap<String, watch::Receiver<Summary>>,
-
-    /// the public key used to check oberon api proofs
-    public_key: PublicKey,
 }
 
 impl Aggregator {
     /// try to build an Aggregator and start its task
-    pub async fn try_build(config: Config) -> Result<Self> {
-        // create the watch channels for sending summaries for each market
-        let mut watch_rx: HashMap<String, watch::Receiver<Summary>> = HashMap::default();
-        let mut watch_tx: HashMap<String, watch::Sender<Summary>> = HashMap::default();
-        for market in &config.markets {
-            let (tx, rx) = watch::channel(Summary::default());
-            watch_rx.insert(market.symbol.to_string(), rx);
-            watch_tx.insert(market.symbol.to_string(), tx);
-        }
-
+    pub async fn try_build(
+        config: Config,
+        watch_tx: HashMap<String, watch::Sender<Summary>>,
+    ) -> Result<Self> {
         // create the shutdown channel
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
 
@@ -338,8 +318,6 @@ impl Aggregator {
         Ok(Aggregator {
             handle: Some(handle),
             shutdown_tx,
-            watch_rx,
-            public_key: config.public_key.clone(),
         })
     }
 
@@ -366,71 +344,5 @@ impl Aggregator {
             .send(())
             .await
             .map_err(|_| Error::ShutdownError)
-    }
-
-    /// returns the watch::Receiver for the Summary data for the specified symbol
-    pub fn get_channel(&self, symbol: &str) -> Result<watch::Receiver<Summary>> {
-        self.watch_rx
-            .get(&symbol.to_string())
-            .cloned()
-            .ok_or(Error::NoDataChannel)
-    }
-
-    fn check_proof(&self, proof: &Option<OberonProof>) -> Result<()> {
-        let proof: ApiProof = proof.as_ref().ok_or(Error::NoOberonProof)?.try_into()?;
-        proof.verify(self.public_key)?;
-        Ok(())
-    }
-}
-
-type SummaryStream = Pin<Box<dyn Stream<Item = tonic::Result<Summary, Status>> + Send>>;
-type ServiceResult<T> = tonic::Result<Response<T>, Status>;
-
-#[tonic::async_trait]
-impl orderbook_aggregator_server::OrderbookAggregator for Aggregator {
-    type BookSummaryStream = SummaryStream;
-
-    async fn book_summary(
-        &self,
-        request: Request<SummaryReq>,
-    ) -> ServiceResult<Self::BookSummaryStream> {
-        let request = request.into_inner();
-        let (tx, rx) = mpsc::channel(64);
-        let summary_receiver = ReceiverStream::new(rx);
-
-        if self.check_proof(&request.proof).is_err() {
-            return Ok(Response::new(
-                Box::pin(summary_receiver) as Self::BookSummaryStream
-            ));
-        }
-
-        let mut watch_rx = match self.get_channel(&request.symbol) {
-            Ok(rx) => rx,
-            Err(_) => {
-                return Ok(Response::new(
-                    Box::pin(summary_receiver) as Self::BookSummaryStream
-                ));
-            }
-        };
-
-        // spawn the task to take the updates from the Summary watch channel and feed them to the
-        // gRPC client that requested the stream
-        tokio::spawn(async move {
-            tokio::select! {
-                // this watches for the client to drop their end of the stream
-                _ = tx.closed() => {
-                    return;
-                }
-                // this watches for the Summary value to change
-                _ = watch_rx.changed() => {
-                    let summary = (*watch_rx.borrow_and_update()).clone();
-                    let _ = tx.send(tonic::Result::<_, Status>::Ok(summary)).await;
-                }
-
-            }
-        });
-        Ok(Response::new(
-            Box::pin(summary_receiver) as Self::BookSummaryStream
-        ))
     }
 }

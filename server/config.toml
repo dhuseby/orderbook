@@ -1,3 +1,4 @@
+listen = "127.0.0.1:8080"
 watchdog_timeout = 30
 order_limit = 10
 public_key = '''

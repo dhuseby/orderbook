@@ -39,6 +39,10 @@ pub enum Error {
     #[error("failed to decode uuid {0}")]
     UuidDecodeError(#[from] uuid::Error),
 
+    // tonic transport error
+    #[error("tonic transport error {0}")]
+    TonicTransportError(#[from] tonic::transport::Error),
+
     // tokio watch channel send error
     #[error("tokio watch channel send failed")]
     TokioWatchSendError,

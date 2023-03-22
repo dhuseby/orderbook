@@ -6,6 +6,7 @@ use std::{
     convert::TryFrom,
     ffi::{OsStr, OsString},
     fs,
+    net::SocketAddr,
     path::PathBuf,
 };
 use url::Url;
@@ -26,6 +27,7 @@ pub struct Market {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
+    pub listen: SocketAddr,
     pub watchdog_timeout: Option<u64>,
     pub order_limit: Option<usize>,
     #[serde(deserialize_with = "pk_de")]

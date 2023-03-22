@@ -2,11 +2,12 @@ pub mod aggregator;
 pub mod api_proof;
 pub mod config;
 pub mod error;
+pub mod grpc;
 pub mod platform;
 pub mod source;
 pub mod utils;
 
-pub(crate) mod orderbook {
+pub mod orderbook {
     use super::{api_proof::ApiProof, error::Error};
     use oberon::Proof;
     use std::fmt;

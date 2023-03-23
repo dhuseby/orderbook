@@ -1,8 +1,13 @@
+pub mod orderbook;
+
+// re-exports
+pub use orderbook::Summary;
+
 use iso8601_timestamp::Timestamp;
 use oberon::{Proof, Token};
 use once_cell::sync::OnceCell;
 use orderbook::{
-    orderbook_aggregator_client::OrderbookAggregatorClient, Level, OberonProof, Summary, SummaryReq,
+    orderbook_aggregator_client::OrderbookAggregatorClient, Level, OberonProof, SummaryReq,
 };
 use rand::prelude::*;
 use serde::{
@@ -31,16 +36,34 @@ enum Task {
     Summary { id: u64, symbol: String },
 }
 
+impl fmt::Display for Task {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Task::Initialize { id, .. } => write!(f, "Initialize({})", id),
+            Task::Shutdown { id } => write!(f, "Shutdown({})", id),
+            Task::Summary { id, .. } => write!(f, "Summary({})", id),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum OrderbookResponse {
-    /// Initialized response
-    Initialized,
     /// Shutdown response
     Shutdown,
     /// Order book summary response
     OrderbookSummary { summary: Summary },
     /// Failed
     Failed { reason: String },
+}
+
+impl fmt::Display for OrderbookResponse {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            OrderbookResponse::Shutdown => write!(f, "Shutdown"),
+            OrderbookResponse::OrderbookSummary { .. } => write!(f, "OrderbookSummary"),
+            OrderbookResponse::Failed { .. } => write!(f, "Failed"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -77,7 +100,7 @@ pub enum TaskError {
     TonicStatusError(#[from] tonic::Status),
 
     /// tonic transport error
-    #[error("tonic transport error")]
+    #[error("{0}")]
     TonicTransportError(#[from] tonic::transport::Error),
 
     /// no client connection error
@@ -99,16 +122,14 @@ impl Task {
     async fn execute(&self) -> Result<TaskResponse, TaskError> {
         match self {
             Task::Initialize { ref endpoint, .. } => {
-                // get the client
-                let mut client = global_client().lock().await;
-
                 // try to connect to the server
-                if let Ok(grpc) = OrderbookAggregatorClient::connect(endpoint.clone()).await {
+                let grpc = OrderbookAggregatorClient::connect(endpoint.clone()).await?;
+                {
+                    // update the client
+                    let mut client = global_client().lock().await;
                     client.grpc = Some(grpc);
-                    Ok(TaskResponse::Initialized)
-                } else {
-                    Err(TaskError::NoConnection)
                 }
+                Ok(TaskResponse::Initialized)
             }
             Task::Shutdown { .. } => {
                 // Do shutdown stuff here
@@ -127,9 +148,10 @@ impl Task {
                 // get the grpc client
                 let grpc = client.grpc.as_mut().ok_or(TaskError::NoConnection)?;
 
-                // send the request
+                // get the streaming receiver
                 let summary: Streaming<Summary> = grpc.book_summary(req).await?.into_inner();
 
+                // send the streaming receiver to a task for receiving updates
                 Ok(TaskResponse::SummaryStream { stream: summary })
             }
         }
@@ -197,6 +219,7 @@ async fn do_resp(task: Task, resp: Result<TaskResponse, TaskError>) {
                                     reason: "The stream was closed by the server".to_string(),
                                 },
                             );
+                            break;
                             // 🔓
                         }
                     }
@@ -211,6 +234,7 @@ async fn do_resp(task: Task, resp: Result<TaskResponse, TaskError>) {
                                 reason: format!("gRPC: {}", status),
                             },
                         );
+                        break;
                         // 🔓
                     }
                 }
@@ -312,11 +336,10 @@ impl Client {
         }
     }
 
-    fn spawn_task(&self, task: Task) {
-        match self.task_send.blocking_send(task) {
-            Ok(()) => {}
-            Err(_) => panic!("shared runtime shut down"),
-        }
+    fn spawn_task(&self, task: Task) -> Result<(), OrderbookError> {
+        self.task_send
+            .blocking_send(task.clone())
+            .map_err(|_| OrderbookError::TaskError)
     }
 }
 
@@ -366,6 +389,10 @@ pub enum OrderbookError {
     #[error("initialize not called yet")]
     NotInitialized,
 
+    /// Failed to spawn the task
+    #[error("failed to spawn task")]
+    TaskError,
+
     /// Failed to deserialized the oberon token
     #[error("failed to deserialize token")]
     TokenError(#[from] serde_json::Error),
@@ -374,9 +401,6 @@ pub enum OrderbookError {
 pub trait OnOrderbookClientEvents: Send {
     /// Called after initialization is complete
     fn initialized(&self, id: u64, orderbook: Arc<Orderbook>);
-
-    /// Called when summary is received
-    fn summary(&self, id: u64, summary: Summary);
 
     /// called when an operation completes
     fn completed(&self, id: u64, resp: OrderbookResponse);
@@ -402,7 +426,7 @@ pub fn orderbook_client_initialize(
 
     // run the initialize task
     let client = global_client().blocking_lock();
-    client.spawn_task(Task::Initialize { id, endpoint });
+    client.spawn_task(Task::Initialize { id, endpoint })?;
 
     Ok(id)
 }
@@ -420,7 +444,7 @@ pub fn orderbook_client_shutdown() -> Result<u64, OrderbookError> {
 
     // run the shutdown task
     let client = global_client().blocking_lock();
-    client.spawn_task(Task::Shutdown { id });
+    client.spawn_task(Task::Shutdown { id })?;
 
     Ok(id)
 }
@@ -448,7 +472,7 @@ impl Orderbook {
             return Err(OrderbookError::NotInitialized);
         }
         let client = global_client().blocking_lock();
-        client.spawn_task(task);
+        client.spawn_task(task)?;
         Ok(())
     }
 }
@@ -504,8 +528,3 @@ mod ffi {
     include!("OrderbookClient.uniffi.rs");
 }
 pub use ffi::*;
-
-#[allow(missing_docs)]
-mod orderbook {
-    include!("orderbook.rs");
-}

@@ -2,12 +2,12 @@
 enum OrderbookError {
     "InitializeAlreadyCalled",
     "NotInitialized",
+    "TaskError",
     "TokenError",
 };
 
 [Enum]
 interface OrderbookResponse {
-    Initialized();
     Shutdown();
     OrderbookSummary(Summary summary);
     Failed(string reason);
@@ -50,9 +50,6 @@ callback interface OnOrderbookClientEvents {
     // contain object interfaces, otherwise we'd just use the completed callback with an
     // OrderbookResponse::Initialize(orderbooK)...oh well
     void initialized(u64 id, Orderbook orderbook);
-
-    // callback whenever the summary has been updated
-    void summary(u64 id, Summary summary);
 
     // catch all callback
     void completed(u64 id, OrderbookResponse resp);

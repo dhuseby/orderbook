@@ -115,24 +115,26 @@ impl orderbook_aggregator_server::OrderbookAggregator for Inner {
         // spawn the task to take the updates from the Summary watch channel and feed them to the
         // gRPC client that requested the stream
         tokio::spawn(async move {
-            tokio::select! {
-                // this watches for the shutdown broadcast
-                _ = shutdown_rx.changed() => {
-                    v1!("gRPC - sending task shutting down");
-                    return;
-                },
-                // this watches for the client to drop their end of the stream
-                _ = tx.closed() => {
-                    v3!("gRPC - summary sender closing");
-                    return;
-                }
-                // this watches for the Summary value to change
-                _ = watch_rx.changed() => {
-                    let summary = (*watch_rx.borrow_and_update()).clone();
-                    let _ = tx.send(tonic::Result::<_, Status>::Ok(summary)).await;
-                    v1!("gRPC - summary sent to client");
-                }
+            loop {
+                tokio::select! {
+                    // this watches for the shutdown broadcast
+                    _ = shutdown_rx.changed() => {
+                        v1!("gRPC - sending task shutting down");
+                        return;
+                    },
+                    // this watches for the client to drop their end of the stream
+                    _ = tx.closed() => {
+                        v3!("gRPC - summary sender closing");
+                        return;
+                    }
+                    // this watches for the Summary value to change
+                    _ = watch_rx.changed() => {
+                        let summary = (*watch_rx.borrow_and_update()).clone();
+                        let _ = tx.send(tonic::Result::<_, Status>::Ok(summary)).await;
+                        v1!("gRPC - summary sent to client");
+                    }
 
+                }
             }
         });
         Ok(Response::new(

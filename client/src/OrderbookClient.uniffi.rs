@@ -25,25 +25,25 @@ uniffi::assert_compatible_version!("0.23.0"); // Please check that you depend on
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub extern "C" fn ffi_OrderbookClient_7af7_rustbuffer_alloc(size: i32, call_status: &mut uniffi::RustCallStatus) -> uniffi::RustBuffer {
+pub extern "C" fn ffi_OrderbookClient_938e_rustbuffer_alloc(size: i32, call_status: &mut uniffi::RustCallStatus) -> uniffi::RustBuffer {
     uniffi::ffi::uniffi_rustbuffer_alloc(size, call_status)
 }
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn ffi_OrderbookClient_7af7_rustbuffer_from_bytes(bytes: uniffi::ForeignBytes, call_status: &mut uniffi::RustCallStatus) -> uniffi::RustBuffer {
+pub unsafe extern "C" fn ffi_OrderbookClient_938e_rustbuffer_from_bytes(bytes: uniffi::ForeignBytes, call_status: &mut uniffi::RustCallStatus) -> uniffi::RustBuffer {
     uniffi::ffi::uniffi_rustbuffer_from_bytes(bytes, call_status)
 }
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn ffi_OrderbookClient_7af7_rustbuffer_free(buf: uniffi::RustBuffer, call_status: &mut uniffi::RustCallStatus) {
+pub unsafe extern "C" fn ffi_OrderbookClient_938e_rustbuffer_free(buf: uniffi::RustBuffer, call_status: &mut uniffi::RustCallStatus) {
     uniffi::ffi::uniffi_rustbuffer_free(buf, call_status)
 }
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "C" fn ffi_OrderbookClient_7af7_rustbuffer_reserve(buf: uniffi::RustBuffer, additional: i32, call_status: &mut uniffi::RustCallStatus) -> uniffi::RustBuffer {
+pub unsafe extern "C" fn ffi_OrderbookClient_938e_rustbuffer_reserve(buf: uniffi::RustBuffer, additional: i32, call_status: &mut uniffi::RustCallStatus) -> uniffi::RustBuffer {
     uniffi::ffi::uniffi_rustbuffer_reserve(buf, additional, call_status)
 }
 
@@ -76,8 +76,12 @@ impl uniffi::RustBufferFfiConverter for FfiConverterTypeOrderbookError {
                 buf.put_i32(2);
                 <String as uniffi::FfiConverter>::write(msg, buf);
             },
-            r#OrderbookError::r#TokenError{..} => {
+            r#OrderbookError::r#TaskError{..} => {
                 buf.put_i32(3);
+                <String as uniffi::FfiConverter>::write(msg, buf);
+            },
+            r#OrderbookError::r#TokenError{..} => {
+                buf.put_i32(4);
                 <String as uniffi::FfiConverter>::write(msg, buf);
             },
         };
@@ -106,20 +110,16 @@ impl uniffi::RustBufferFfiConverter for FfiConverterTypeOrderbookResponse {
     fn write(obj: Self::RustType, buf: &mut std::vec::Vec<u8>) {
         use uniffi::deps::bytes::BufMut;
         match obj {
-            r#OrderbookResponse::r#Initialized {  } => {
+            r#OrderbookResponse::r#Shutdown {  } => {
                 buf.put_i32(1);
                 
             },
-            r#OrderbookResponse::r#Shutdown {  } => {
-                buf.put_i32(2);
-                
-            },
             r#OrderbookResponse::r#OrderbookSummary { r#summary, } => {
-                buf.put_i32(3);
+                buf.put_i32(2);
                 <FfiConverterTypeSummary as uniffi::FfiConverter>::write(r#summary, buf);
             },
             r#OrderbookResponse::r#Failed { r#reason, } => {
-                buf.put_i32(4);
+                buf.put_i32(3);
                 <String as uniffi::FfiConverter>::write(r#reason, buf);
             },
         };
@@ -129,13 +129,12 @@ impl uniffi::RustBufferFfiConverter for FfiConverterTypeOrderbookResponse {
         use uniffi::deps::bytes::Buf;
         uniffi::check_remaining(buf, 4)?;
         Ok(match buf.get_i32() {
-            1 => r#OrderbookResponse::r#Initialized,
-            2 => r#OrderbookResponse::r#Shutdown,
-            3 => r#OrderbookResponse::r#OrderbookSummary {
+            1 => r#OrderbookResponse::r#Shutdown,
+            2 => r#OrderbookResponse::r#OrderbookSummary {
                 
                 r#summary: <FfiConverterTypeSummary as uniffi::FfiConverter>::try_read(buf)?,
             },
-            4 => r#OrderbookResponse::r#Failed {
+            3 => r#OrderbookResponse::r#Failed {
                 
                 r#reason: <String as uniffi::FfiConverter>::try_read(buf)?,
             },
@@ -205,7 +204,7 @@ impl uniffi::RustBufferFfiConverter for FfiConverterTypeSummary {
 #[doc(hidden)]
 #[no_mangle]
 #[allow(clippy::let_unit_value)] // Sometimes we generate code that binds `_retval` to `()`.
-pub extern "C" fn r#OrderbookClient_7af7_orderbook_client_initialize(
+pub extern "C" fn r#OrderbookClient_938e_orderbook_client_initialize(
     
         r#token: uniffi::RustBuffer,
         r#endpoint: uniffi::RustBuffer,
@@ -214,7 +213,7 @@ pub extern "C" fn r#OrderbookClient_7af7_orderbook_client_initialize(
 )  -> u64 {
     // If the provided function does not match the signature specified in the UDL
     // then this attempt to call it will not compile, and will give guidance as to why.
-    uniffi::deps::log::debug!("OrderbookClient_7af7_orderbook_client_initialize");
+    uniffi::deps::log::debug!("OrderbookClient_938e_orderbook_client_initialize");
     
 
 uniffi::call_with_result(call_status, || {
@@ -241,13 +240,13 @@ uniffi::call_with_result(call_status, || {
 #[doc(hidden)]
 #[no_mangle]
 #[allow(clippy::let_unit_value)] // Sometimes we generate code that binds `_retval` to `()`.
-pub extern "C" fn r#OrderbookClient_7af7_orderbook_client_shutdown(
+pub extern "C" fn r#OrderbookClient_938e_orderbook_client_shutdown(
     
     call_status: &mut uniffi::RustCallStatus
 )  -> u64 {
     // If the provided function does not match the signature specified in the UDL
     // then this attempt to call it will not compile, and will give guidance as to why.
-    uniffi::deps::log::debug!("OrderbookClient_7af7_orderbook_client_shutdown");
+    uniffi::deps::log::debug!("OrderbookClient_938e_orderbook_client_shutdown");
     
 
 uniffi::call_with_result(call_status, || {
@@ -282,7 +281,7 @@ uniffi::deps::static_assertions::assert_impl_all!(r#Orderbook: Sync, Send);
 
 #[doc(hidden)]
 #[no_mangle]
-pub extern "C" fn ffi_OrderbookClient_7af7_Orderbook_object_free(ptr: *const std::os::raw::c_void, call_status: &mut uniffi::RustCallStatus) {
+pub extern "C" fn ffi_OrderbookClient_938e_Orderbook_object_free(ptr: *const std::os::raw::c_void, call_status: &mut uniffi::RustCallStatus) {
     uniffi::call_with_output(call_status, || {
         assert!(!ptr.is_null());
         drop(unsafe { std::sync::Arc::from_raw(ptr as *const r#Orderbook) })
@@ -290,9 +289,9 @@ pub extern "C" fn ffi_OrderbookClient_7af7_Orderbook_object_free(ptr: *const std
 }
     #[doc(hidden)]
     #[no_mangle]
-    pub extern "C" fn r#OrderbookClient_7af7_Orderbook_new(
+    pub extern "C" fn r#OrderbookClient_938e_Orderbook_new(
     call_status: &mut uniffi::RustCallStatus) -> *const std::os::raw::c_void /* *const Orderbook */ {
-        uniffi::deps::log::debug!("OrderbookClient_7af7_Orderbook_new");
+        uniffi::deps::log::debug!("OrderbookClient_938e_Orderbook_new");
         
 
         // If the constructor does not have the same signature as declared in the UDL, then
@@ -311,12 +310,12 @@ pub extern "C" fn ffi_OrderbookClient_7af7_Orderbook_object_free(ptr: *const std
     #[doc(hidden)]
     #[no_mangle]
     #[allow(clippy::let_unit_value)] // Sometimes we generate code that binds `_retval` to `()`.
-    pub extern "C" fn r#OrderbookClient_7af7_Orderbook_summary(
+    pub extern "C" fn r#OrderbookClient_938e_Orderbook_summary(
         r#ptr: *const std::os::raw::c_void,
         r#symbol: uniffi::RustBuffer,
     call_status: &mut uniffi::RustCallStatus
     )  -> u64 {
-        uniffi::deps::log::debug!("OrderbookClient_7af7_Orderbook_summary");
+        uniffi::deps::log::debug!("OrderbookClient_938e_Orderbook_summary");
         // If the method does not have the same signature as declared in the UDL, then
         // this attempt to call it will fail with a (somewhat) helpful compiler error.
         uniffi::call_with_result(call_status, || {
@@ -345,7 +344,7 @@ static FOREIGN_CALLBACK_ONORDERBOOKCLIENTEVENTS_INTERNALS: uniffi::ForeignCallba
 
 #[doc(hidden)]
 #[no_mangle]
-pub extern "C" fn ffi_OrderbookClient_7af7_OnOrderbookClientEvents_init_callback(callback: uniffi::ForeignCallback, _: &mut uniffi::RustCallStatus) {
+pub extern "C" fn ffi_OrderbookClient_938e_OnOrderbookClientEvents_init_callback(callback: uniffi::ForeignCallback, _: &mut uniffi::RustCallStatus) {
     FOREIGN_CALLBACK_ONORDERBOOKCLIENTEVENTS_INTERNALS.set_callback(callback);
     // The call status should be initialized to CALL_SUCCESS, so no need to modify it.
 }
@@ -426,64 +425,6 @@ impl r#OnOrderbookClientEvents for FfiConverterCallbackInterfaceOnOrderbookClien
             }
         }
     }
-    fn r#summary(&self, 
-            r#id: u64,
-            r#summary: r#Summary){
-        let mut args_buf = Vec::new();
-        
-        <u64 as uniffi::FfiConverter>::write(r#id, &mut args_buf);
-        <FfiConverterTypeSummary as uniffi::FfiConverter>::write(r#summary, &mut args_buf);let args_rbuf = uniffi::RustBuffer::from_vec(args_buf);
-        let callback = FOREIGN_CALLBACK_ONORDERBOOKCLIENTEVENTS_INTERNALS.get_callback().unwrap();
-
-        unsafe {
-            // SAFETY:
-            // * We're passing in a pointer to an empty buffer.
-            //   * Nothing allocated, so nothing to drop.
-            // * We expect the callback to write into that a valid allocated instance of a
-            //   RustBuffer.
-            let mut ret_rbuf = uniffi::RustBuffer::new();
-            let ret = callback(self.handle, 2, args_rbuf, &mut ret_rbuf);
-            #[allow(clippy::let_and_return, clippy::let_unit_value)]
-            match ret {
-                1 => {
-                    // 1 indicates success with the return value written to the RustBuffer for
-                    //   non-void calls.
-                    let result = {
-                        
-                        uniffi::RustBuffer::destroy(ret_rbuf);
-                    };
-                    result
-                }
-                -2 => {
-                    // -2 indicates an error written to the RustBuffer
-                    panic!("Callback return -2, but throws_type() is None");
-                }
-                // 0 is a deprecated method to indicates success for void returns
-                0 => {
-                    uniffi::deps::log::error!("UniFFI: Callback interface returned 0. Please update the bindings code to return 1 for all successful calls");
-                    
-                    
-                }
-                // -1 indicates an unexpected error
-                
-                -1 => {
-                    if !ret_rbuf.is_empty() {
-                        let reason = match <String as uniffi::FfiConverter>::try_lift(ret_rbuf) {
-                            Ok(s) => s,
-                            Err(_) => {
-                                String::from("[Error reading reason]")
-                            }
-                        };
-                        panic!("callback failed. Reason: {}", reason);
-                    } else {
-                        panic!("Callback failed")
-                    }
-                },
-                // Other values should never be returned
-                _ => panic!("Callback failed with unexpected return code"),
-            }
-        }
-    }
     fn r#completed(&self, 
             r#id: u64,
             r#resp: r#OrderbookResponse){
@@ -500,7 +441,7 @@ impl r#OnOrderbookClientEvents for FfiConverterCallbackInterfaceOnOrderbookClien
             // * We expect the callback to write into that a valid allocated instance of a
             //   RustBuffer.
             let mut ret_rbuf = uniffi::RustBuffer::new();
-            let ret = callback(self.handle, 3, args_rbuf, &mut ret_rbuf);
+            let ret = callback(self.handle, 2, args_rbuf, &mut ret_rbuf);
             #[allow(clippy::let_and_return, clippy::let_unit_value)]
             match ret {
                 1 => {

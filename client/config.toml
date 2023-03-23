@@ -1,0 +1,15 @@
+connect = "http://127.0.0.1:8080"
+token = '''
+{
+  "id": "ff0392bc-4d21-457e-b910-3546ed217c94",
+  "token": "90c86140caaf151d54ffdc77dd7c4f71803a5c5af5eabf0973bbf39a5e9927e4bf697df806e8748725e5e07d0ce9b62a"
+}
+'''
+[[markets]]
+symbol = "ethbtc"
+
+[[markets]]
+symbol = "btcusdc"
+
+[[markets]]
+symbol = "dogeusdc"

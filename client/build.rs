@@ -30,7 +30,7 @@ fn build_uniffi(s: &str) -> Result<()> {
 
     // generates the orderbook.uniffi.rs file that gets included into the src/lib.rs file. the rust
     // code handles all of the lowering and lifting to/from rust.
-    uniffi::generate_component_scaffolding(&udl_file, None, Some(udl_dir.as_ref()), false).unwrap();
+    uniffi::generate_component_scaffolding(&udl_file, None, Some(udl_dir.as_ref()), false)?;
 
     // generate the bindings
     uniffi::generate_bindings(
@@ -40,8 +40,7 @@ fn build_uniffi(s: &str) -> Result<()> {
         Some(out_dir.as_ref()),
         None,
         false,
-    )
-    .unwrap();
+    )?;
 
     // set up the dir structure
     let mut target = manifest_dir.clone();
